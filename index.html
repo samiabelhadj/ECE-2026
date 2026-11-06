@@ -1,1 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Neural net playground</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3f5f2;--ink:#14201f;--mute:#5b6b69;--panel:#e4e9e5;--line:#c5cfca;--a:#e8662c;--b:#0f7f8a;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1716;--ink:#e6efec;--mute:#93a6a2;--panel:#18231f;--line:#2b3a36;--a:#ff8a4d;--b:#3fc0cc}}
+:root[data-theme="dark"]{--bg:#0f1716;--ink:#e6efec;--mute:#93a6a2;--panel:#18231f;--line:#2b3a36;--a:#ff8a4d;--b:#3fc0cc}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.55 "Bricolage Grotesque",system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 18px 48px}
+h1{font-size:clamp(28px,5vw,46px);line-height:1.05;margin:0 0 10px;font-weight:800;letter-spacing:-.02em}
+.lede{max-width:60ch;color:var(--mute);margin:0 0 24px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;align-items:start}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+canvas{width:100%;aspect-ratio:1;display:block;background:var(--panel);border:1px solid var(--line);border-radius:6px;touch-action:none}
+.side{display:flex;flex-direction:column;gap:16px}
+label{display:flex;justify-content:space-between;font-weight:600;font-size:14px;margin-bottom:4px}
+label span{color:var(--mute);font-weight:400}
+select,input[type=range]{width:100%}
+select{font:inherit;padding:8px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:4px}
+input[type=range]{accent-color:var(--b)}
+.row{display:flex;gap:8px}
+button{flex:1;font:600 15px inherit;font-family:inherit;padding:10px;border-radius:4px;border:1px solid var(--ink);background:var(--ink);color:var(--bg);cursor:pointer}
+button.alt{background:transparent;color:var(--ink)}
+:focus-visible{outline:3px solid var(--a);outline-offset:2px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-variant-numeric:tabular-nums}
+dt{color:var(--mute)}dd{margin:0;font-weight:600;text-align:right}
+.key{display:flex;gap:14px;font-size:14px;color:var(--mute)}
+.key i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+p.note{font-size:14px;color:var(--mute);margin:24px 0 0;max-width:70ch}
+</style>
+</head>
+<body>
+<main>
+<h1>A neural net learning in front of you</h1>
+<p class="lede">Two hidden layers, written in plain JavaScript with hand-coded backpropagation. The colored field shows what the network currently believes about every point in the plane.</p>
+<div class="grid">
+  <canvas id="c" width="560" height="560" aria-label="Decision boundary of the network"></canvas>
+  <div class="side">
+    <div class="key"><span><i style="background:var(--a)"></i>Class 0</span><span><i style="background:var(--b)"></i>Class 1</span></div>
+    <div><label for="ds">Dataset</label>
+      <select id="ds"><option value="circle">Circle in ring</option><option value="xor">XOR quadrants</option><option value="spiral">Two spirals</option></select></div>
+    <div><label for="hs">Hidden units <span id="hv">10</span></label><input id="hs" type="range" min="2" max="16" value="10"></div>
+    <div><label for="lr">Learning rate <span id="lv">0.05</span></label><input id="lr" type="range" min="1" max="20" value="5"></div>
+    <div class="row"><button id="pp">Pause</button><button id="rs" class="alt">Reset</button></div>
+    <dl><dt>Epoch</dt><dd id="ep">0</dd><dt>Loss</dt><dd id="ls">–</dd><dt>Accuracy</dt><dd id="ac">–</dd></dl>
+  </div>
+</div>
+<p class="note">Tip: the two spirals need more hidden units and a few thousand epochs. Drop the learning rate if the loss starts to bounce. Click the canvas to add a point of the current class (hold Shift for class 1).</p>
+</main>
+<script>
+const $=id=>document.getElementById(id), C=$('c'), ctx=C.getContext('2d');
+const G=64, off=document.createElement('canvas'); off.width=off.height=G; const octx=off.getContext('2d');
+let data=[], net, epoch=0, running=true;
+const rnd=s=>(Math.random()-.5)*2*s;
 
+function makeData(kind){
+  const d=[], n=100;
+  for(let i=0;i<n;i++){
+    if(kind==='spiral'){
+      for(let k=0;k<2;k++){const t=.15+i/n*.8, a=t*9+k*Math.PI;
+        d.push({x:[t*Math.cos(a)+rnd(.03),t*Math.sin(a)+rnd(.03)],y:k});}
+    }else if(kind==='circle'){
+      for(let k=0;k<2;k++){const r=k?Math.random()*.38:.62+Math.random()*.3, a=Math.random()*6.283;
+        d.push({x:[r*Math.cos(a),r*Math.sin(a)],y:k});}
+    }else{
+      for(let k=0;k<2;k++){const x=rnd(.9),y=rnd(.9);d.push({x:[x,y],y:(x*y>0)?1:0});}
+    }
+  }
+  return d;
+}
+function init(){
+  const H=+$('hs').value, sizes=[2,H,H,1];
+  net={W:[],b:[]};
+  for(let l=0;l<3;l++){
+    const fi=sizes[l], fo=sizes[l+1], s=Math.sqrt(2/(fi+fo));
+    net.W.push(Array.from({length:fo},()=>Array.from({length:fi},()=>rnd(1.7)*s)));
+    net.b.push(new Array(fo).fill(0));
+  }
+  epoch=0;
+}
+function fwd(x){
+  const A=[x]; let a=x;
+  for(let l=0;l<net.W.length;l++){
+    const last=l===net.W.length-1;
+    a=net.W[l].map((w,j)=>{let z=net.b[l][j];for(let i=0;i<w.length;i++)z+=w[i]*a[i];return last?1/(1+Math.exp(-z)):Math.tanh(z)});
+    A.push(a);
+  }
+  return A;
+}
+function step(x,y,lr){
+  const A=fwd(x), L=net.W.length; let d=[A[L][0]-y];
+  for(let l=L-1;l>=0;l--){
+    const W=net.W[l], a=A[l], nd=l>0?new Array(a.length).fill(0):null;
+    for(let j=0;j<W.length;j++){
+      for(let i=0;i<a.length;i++){ if(nd) nd[i]+=W[j][i]*d[j]; W[j][i]-=lr*d[j]*a[i]; }
+      net.b[l][j]-=lr*d[j];
+    }
+    if(nd) for(let i=0;i<nd.length;i++) nd[i]*=1-a[i]*a[i];
+    d=nd;
+  }
+}
+function train(){
+  const lr=+$('lr').value/100;
+  for(let e=0;e<8;e++){
+    for(let i=data.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[data[i],data[j]]=[data[j],data[i]];}
+    for(const p of data) step(p.x,p.y,lr);
+    epoch++;
+  }
+}
+function stats(){
+  let loss=0, ok=0;
+  for(const p of data){const o=fwd(p.x)[3][0], q=Math.min(Math.max(o,1e-7),1-1e-7);
+    loss-=p.y?Math.log(q):Math.log(1-q); if((o>.5)==(p.y==1)) ok++;}
+  $('ep').textContent=epoch; $('ls').textContent=(loss/data.length).toFixed(3);
+  $('ac').textContent=(100*ok/data.length).toFixed(0)+'%';
+}
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function draw(){
+  const img=octx.createImageData(G,G);
+  for(let gy=0;gy<G;gy++)for(let gx=0;gx<G;gx++){
+    const p=fwd([(gx/(G-1))*2-1,1-(gy/(G-1))*2])[3][0], k=(gy*G+gx)*4, c=p>.5?[15,127,138]:[232,102,44];
+    img.data[k]=c[0];img.data[k+1]=c[1];img.data[k+2]=c[2];img.data[k+3]=40+Math.abs(p-.5)*2*170;
+  }
+  octx.putImageData(img,0,0);
+  ctx.clearRect(0,0,C.width,C.height); ctx.imageSmoothingEnabled=true; ctx.drawImage(off,0,0,C.width,C.height);
+  const ca=css('--a'), cb=css('--b'), ink=css('--ink');
+  for(const p of data){
+    const X=(p.x[0]+1)/2*C.width, Y=(1-p.x[1])/2*C.height;
+    ctx.beginPath();ctx.arc(X,Y,5,0,6.283);ctx.fillStyle=p.y?cb:ca;ctx.fill();ctx.lineWidth=1.5;ctx.strokeStyle=ink;ctx.stroke();
+  }
+}
+function loop(){ if(running){train();stats();} draw(); requestAnimationFrame(loop); }
+function reset(){ data=makeData($('ds').value); init(); }
+$('ds').onchange=reset; $('rs').onclick=reset;
+$('hs').oninput=()=>{$('hv').textContent=$('hs').value;init();};
+$('lr').oninput=()=>{$('lv').textContent=($('lr').value/100).toFixed(2);};
+$('pp').onclick=()=>{running=!running;$('pp').textContent=running?'Pause':'Resume';};
+C.addEventListener('pointerdown',e=>{
+  const r=C.getBoundingClientRect();
+  data.push({x:[((e.clientX-r.left)/r.width)*2-1,1-((e.clientY-r.top)/r.height)*2],y:e.shiftKey?1:0});
+});
+reset(); loop();
+</script>
+</body>
+</html>
